@@ -37,10 +37,16 @@ export function SiteHeader() {
             </a>
           ))}
         </nav>
-        <Button href="/demo">
-          Try the demo
-          <ArrowRightIcon className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button href="/admin" variant="secondary" className="px-3 whitespace-nowrap sm:px-4">
+            <span className="sm:hidden">Admin</span>
+            <span className="hidden sm:inline">Admin dashboard</span>
+          </Button>
+          <Button href="/demo" className="px-3 whitespace-nowrap sm:px-4">
+            Try the demo
+            <ArrowRightIcon className="hidden size-3.5 transition-transform group-hover:translate-x-0.5 sm:block" />
+          </Button>
+        </div>
       </div>
     </header>
   );
