@@ -1,0 +1,1184 @@
+openapi: 3.1.0
+info:
+  title: Sourced AI
+  version: 0.4.0
+  description: Support answers from a business's own docs, with sources. Demo data is the fictional Pinebrook Supply store.
+servers:
+  - url: http://localhost:3100
+    description: Local development
+# Public endpoints need no auth; admin endpoints override this with adminSession.
+security: []
+paths:
+  /api/questions:
+    post:
+      summary: Ask a question and get an answer from the docs
+      description: >
+        Spec 002. Finds the closest passages in the docs and answers only from them.
+        When no passage is a close match, or the passages don't answer the question,
+        the reply has is_answered false and no citations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  example: Can I return a kettle I've already used?
+                conversation_id:
+                  type: string
+                  format: uuid
+                  description: Spec 003. Groups questions into a conversation for the handoff and the log.
+      responses:
+        "200":
+          description: Answered, or no answer found in the docs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [answer]
+                        properties:
+                          answer:
+                            $ref: "#/components/schemas/Answer"
+        "400":
+          description: VALIDATION_ERROR. Question missing, empty or over 500 characters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "429":
+          description: >
+            AI_RATE_LIMITED (every AI provider is rate limited), RATE_LIMITED (this visitor
+            asked more than 20 questions in 10 minutes) or DAILY_LIMIT_REACHED (the demo-wide
+            daily cap). Spec 004 codes carry Retry-After and context.retry_after_seconds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "503":
+          description: AI_UNAVAILABLE. The AI provider failed or is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "500":
+          description: INTERNAL_ERROR.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+  /api/handoffs:
+    post:
+      summary: Hand the conversation to the team
+      description: >
+        Spec 003 (amended). Saves the handoff and returns straight away; the channels
+        in HANDOFF_NOTIFY (slack, email, webhook) are notified after the response and
+        their results appear in the admin inbox. Notifications are built from the
+        server's own question log; the client sends only the id and an optional email.
+        One handoff per conversation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [conversation_id]
+              properties:
+                conversation_id:
+                  type: string
+                  format: uuid
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
+      responses:
+        "201":
+          description: Handoff received
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          handoff:
+                            type: object
+                            required: [id, status]
+                            properties:
+                              id:
+                                type: string
+                                format: uuid
+                              status:
+                                type: string
+                                enum: [received]
+        "400":
+          description: VALIDATION_ERROR. Bad conversation id or email.
+        "404":
+          description: CONVERSATION_NOT_FOUND. No questions logged for this conversation.
+        "409":
+          description: HANDOFF_ALREADY_SENT. The conversation already has a handoff.
+        "429":
+          description: RATE_LIMITED. More than 5 handoffs from this visitor in an hour; carries Retry-After.
+  /api/admin/sessions:
+    post:
+      summary: Sign in to the admin area
+      description: Spec 003. Sets the hg_admin HTTP-only cookie for 12 hours.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+      responses:
+        "204":
+          description: Signed in; Set-Cookie carries the session.
+        "401":
+          description: INVALID_CREDENTIALS.
+        "429":
+          description: >
+            RATE_LIMITED. 5 failed sign-ins from this visitor in 15 minutes; every sign-in is
+            refused until the window passes. Carries Retry-After.
+        "503":
+          description: ADMIN_DISABLED. ADMIN_PASSWORD unset or shorter than 6 characters.
+    delete:
+      summary: Sign out
+      responses:
+        "204":
+          description: Session cookie cleared.
+  /api/admin/overview:
+    get:
+      security:
+        - adminSession: []
+      summary: Overview dashboard figures
+      description: Spec 005 B5 to B9. Days are whole days in STORE_TIMEZONE. Test traffic is excluded.
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            enum: [7, 30, 90]
+            default: 30
+      responses:
+        "200":
+          description: Overview retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          overview:
+                            $ref: "#/components/schemas/Overview"
+        "400":
+          description: VALIDATION_ERROR (days must be 7, 30 or 90).
+        "401":
+          description: UNAUTHENTICATED.
+  /api/admin/conversations:
+    get:
+      security:
+        - adminSession: []
+      summary: Every chat, newest first
+      description: Spec 005 B10 and B11. Search matches any question in the conversation.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, answered, unanswered, handed_off]
+            default: all
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: Conversations retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          conversations:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/ConversationSummary"
+                          pagination:
+                            $ref: "#/components/schemas/Pagination"
+        "401":
+          description: UNAUTHENTICATED.
+  /api/admin/conversations/{conversation_id}:
+    get:
+      security:
+        - adminSession: []
+      summary: One conversation with the sources each answer cited
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Conversation retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          conversation:
+                            type: object
+                            properties:
+                              conversation_id:
+                                type: string
+                                format: uuid
+                              started_at:
+                                type: string
+                                format: date-time
+                              handoff_id:
+                                type: [string, "null"]
+                                format: uuid
+                              messages:
+                                type: array
+                                items:
+                                  $ref: "#/components/schemas/Message"
+        "401":
+          description: UNAUTHENTICATED.
+        "404":
+          description: CONVERSATION_NOT_FOUND.
+  /api/admin/gaps:
+    get:
+      security:
+        - adminSession: []
+      summary: Questions Sourced AI couldn't answer, grouped by meaning
+      description: Spec 003, revised by spec 005 B17 to B19. A gap is open until marked doc written, and reopens when asked again.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, resolved]
+            default: open
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+      responses:
+        "200":
+          description: Gap report retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          gaps:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Gap"
+                          summary:
+                            type: object
+                            properties:
+                              questions:
+                                type: integer
+                              answered:
+                                type: integer
+                              unanswered:
+                                type: integer
+                              handoffs_sent:
+                                type: integer
+                              days:
+                                type: integer
+                          pagination:
+                            $ref: "#/components/schemas/Pagination"
+        "401":
+          description: UNAUTHENTICATED.
+  /api/admin/gaps/{gap_id}:
+    patch:
+      security:
+        - adminSession: []
+      summary: Mark a gap as doc written, or reopen it
+      description: Spec 005 B18.
+      parameters:
+        - name: gap_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_resolved]
+              properties:
+                is_resolved:
+                  type: boolean
+      responses:
+        "200":
+          description: Gap marked doc written, or reopened
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          gap:
+                            type: object
+                            properties:
+                              gap_id:
+                                type: string
+                                format: uuid
+                              is_resolved:
+                                type: boolean
+        "400":
+          description: VALIDATION_ERROR.
+        "401":
+          description: UNAUTHENTICATED.
+        "404":
+          description: GAP_NOT_FOUND.
+  /api/admin/handoffs:
+    get:
+      security:
+        - adminSession: []
+      summary: The handoff inbox
+      description: Spec 003 (amended), revised by spec 005. open_count feeds the sidebar badge.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, handled, all]
+            default: open
+      responses:
+        "200":
+          description: Handoffs retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          handoffs:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Handoff"
+                          open_count:
+                            type: integer
+                          pagination:
+                            $ref: "#/components/schemas/Pagination"
+        "401":
+          description: UNAUTHENTICATED.
+  /api/admin/handoffs/{handoff_id}:
+    parameters:
+      - name: handoff_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      security:
+        - adminSession: []
+      summary: One handoff with its conversation, sources and notes
+      responses:
+        "200":
+          description: Handoff retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          handoff:
+                            allOf:
+                              - $ref: "#/components/schemas/Handoff"
+                              - type: object
+                                properties:
+                                  conversation:
+                                    type: array
+                                    items:
+                                      $ref: "#/components/schemas/Message"
+                                  notes:
+                                    type: array
+                                    items:
+                                      $ref: "#/components/schemas/Note"
+        "401":
+          description: UNAUTHENTICATED.
+        "404":
+          description: HANDOFF_NOT_FOUND.
+    patch:
+      security:
+        - adminSession: []
+      summary: Mark a handoff handled, or reopen it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_handled]
+              properties:
+                is_handled:
+                  type: boolean
+      responses:
+        "200":
+          description: Handoff marked handled, or reopened
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          handoff:
+                            $ref: "#/components/schemas/Handoff"
+        "400":
+          description: VALIDATION_ERROR.
+        "401":
+          description: UNAUTHENTICATED.
+        "404":
+          description: HANDOFF_NOT_FOUND.
+  /api/admin/handoffs/{handoff_id}/notes:
+    post:
+      security:
+        - adminSession: []
+      summary: Add an internal note to a handoff
+      description: Spec 005 B14. Notes are never sent to the customer or any channel.
+      parameters:
+        - name: handoff_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+      responses:
+        "201":
+          description: Note added
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          note:
+                            $ref: "#/components/schemas/Note"
+        "400":
+          description: VALIDATION_ERROR (empty or over 2,000 characters).
+        "401":
+          description: UNAUTHENTICATED.
+        "404":
+          description: HANDOFF_NOT_FOUND.
+  /api/admin/documents:
+    get:
+      security:
+        - adminSession: []
+      summary: The help documents answers come from
+      description: Spec 005 B20.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Documents retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          documents:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Document"
+                          limit:
+                            type: integer
+                            example: 25
+                          pagination:
+                            $ref: "#/components/schemas/Pagination"
+        "401":
+          description: UNAUTHENTICATED.
+    post:
+      security:
+        - adminSession: []
+      summary: Add a document from a file or pasted text
+      description: Spec 005 B21 to B24. Send either `file` (.md, .markdown, .txt or .pdf, up to 2 MB) with an optional `title`, or `title` and `text`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DocumentUpload"
+      responses:
+        "201":
+          description: Document added
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          document:
+                            $ref: "#/components/schemas/Document"
+        "400":
+          description: VALIDATION_ERROR (pasted text without a title or text).
+        "401":
+          description: UNAUTHENTICATED.
+        "409":
+          description: DOCUMENT_LIMIT_REACHED, context.limit is 25.
+        "422":
+          description: DOCUMENT_INVALID (file type, size, or no text found).
+        "429":
+          description: AI_RATE_LIMITED while indexing.
+        "503":
+          description: AI_UNAVAILABLE while indexing.
+  /api/admin/documents/{document_id}:
+    parameters:
+      - name: document_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      security:
+        - adminSession: []
+      summary: One document with its passages
+      responses:
+        "200":
+          description: Document retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          document:
+                            allOf:
+                              - $ref: "#/components/schemas/Document"
+                              - type: object
+                                properties:
+                                  passages:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        section_number:
+                                          type: integer
+                                        heading:
+                                          type: string
+                                        content:
+                                          type: string
+        "401":
+          description: UNAUTHENTICATED.
+        "404":
+          description: DOCUMENT_NOT_FOUND.
+    patch:
+      security:
+        - adminSession: []
+      summary: Replace a document with a new version
+      description: Spec 005 B23. Passages are swapped in one transaction.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DocumentUpload"
+      responses:
+        "200":
+          description: Document replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          document:
+                            $ref: "#/components/schemas/Document"
+        "401":
+          description: UNAUTHENTICATED.
+        "404":
+          description: DOCUMENT_NOT_FOUND.
+        "422":
+          description: DOCUMENT_INVALID.
+    delete:
+      security:
+        - adminSession: []
+      summary: Delete a document
+      description: Spec 005 B23. The document is soft deleted and its passages leave the search index.
+      responses:
+        "204":
+          description: Document deleted.
+        "401":
+          description: UNAUTHENTICATED.
+        "404":
+          description: DOCUMENT_NOT_FOUND.
+  /api/admin/settings:
+    get:
+      security:
+        - adminSession: []
+      summary: Read-only settings, without secrets
+      description: Spec 005 B26 and B27. Webhook addresses show their host only.
+      responses:
+        "200":
+          description: Settings retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          settings:
+                            $ref: "#/components/schemas/Settings"
+        "401":
+          description: UNAUTHENTICATED.
+  /api/admin/notification-tests:
+    post:
+      security:
+        - adminSession: []
+      summary: Send a test alert through one channel
+      description: Spec 005 B28. A sample handoff labelled as a test (Slack header, [Test] email subject, webhook event handoff.test). Five per 10 minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel]
+              properties:
+                channel:
+                  type: string
+                  enum: [slack, email, webhook]
+      responses:
+        "200":
+          description: Test alert sent, or written to the server log
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          result:
+                            type: string
+                            enum: [sent, logged]
+        "400":
+          description: VALIDATION_ERROR.
+        "401":
+          description: UNAUTHENTICATED.
+        "422":
+          description: NOTIFICATION_NOT_CONFIGURED, context carries state and missing settings.
+        "429":
+          description: RATE_LIMITED.
+        "502":
+          description: NOTIFICATION_FAILED, context.detail says what the channel answered.
+components:
+  securitySchemes:
+    adminSession:
+      type: apiKey
+      in: cookie
+      name: hg_admin
+      description: Set by POST /api/admin/sessions.
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      description: Capped at 100.
+      schema:
+        type: integer
+        minimum: 1
+        default: 20
+  schemas:
+    Envelope:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - AI_RATE_LIMITED
+            - AI_UNAVAILABLE
+            - CONVERSATION_NOT_FOUND
+            - HANDOFF_ALREADY_SENT
+            - HANDOFF_NOT_FOUND
+            - UNAUTHENTICATED
+            - INVALID_CREDENTIALS
+            - ADMIN_DISABLED
+            - RATE_LIMITED
+            - DAILY_LIMIT_REACHED
+            - GAP_NOT_FOUND
+            - DOCUMENT_NOT_FOUND
+            - DOCUMENT_INVALID
+            - DOCUMENT_LIMIT_REACHED
+            - NOTIFICATION_NOT_CONFIGURED
+            - NOTIFICATION_FAILED
+            - INTERNAL_ERROR
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+        context:
+          type: object
+    Answer:
+      type: object
+      required: [is_answered, text, citations]
+      properties:
+        is_answered:
+          type: boolean
+        text:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Citation"
+    Citation:
+      type: object
+      required: [number, document_slug, document_title, section_number, heading, content]
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        document_slug:
+          type: string
+          example: returns-and-refunds
+        document_title:
+          type: string
+          example: Returns and refunds
+        section_number:
+          type: integer
+          example: 2
+        heading:
+          type: string
+          example: Used and opened items
+        content:
+          type: string
+    Pagination:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+    Handoff:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        email:
+          type: [string, "null"]
+        question_count:
+          type: integer
+        is_handled:
+          type: boolean
+        handled_at:
+          type: [string, "null"]
+          format: date-time
+        notifications:
+          type: array
+          items:
+            type: object
+            properties:
+              channel:
+                type: string
+                enum: [slack, email, webhook]
+              status:
+                type: string
+                enum: [sent, failed, logged]
+              problem:
+                type: [string, "null"]
+                enum: [not_configured, delivery_failed, null]
+                description: Spec 005 B15. A missing setting reads as not_configured.
+              error:
+                type: [string, "null"]
+    Message:
+      type: object
+      properties:
+        question:
+          type: string
+        answer_text:
+          type: string
+        is_answered:
+          type: boolean
+        citations:
+          type: array
+          description: Empty for answers logged before spec 005.
+          items:
+            $ref: "#/components/schemas/Citation"
+        created_at:
+          type: string
+          format: date-time
+    Note:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    ConversationSummary:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+        started_at:
+          type: string
+          format: date-time
+        last_message_at:
+          type: string
+          format: date-time
+        first_question:
+          type: string
+        questions:
+          type: integer
+        answered:
+          type: integer
+        handoff_id:
+          type: [string, "null"]
+          format: uuid
+    Gap:
+      type: object
+      properties:
+        gap_id:
+          type: string
+          format: uuid
+        question:
+          type: string
+          description: The most common wording in the group.
+        wordings:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+              times_asked:
+                type: integer
+        times_asked:
+          type: integer
+        last_asked_at:
+          type: string
+          format: date-time
+        daily_counts:
+          type: array
+          description: The last 14 days in STORE_TIMEZONE, oldest first.
+          items:
+            type: integer
+        resolved_at:
+          type: [string, "null"]
+          format: date-time
+        asked_again:
+          type: boolean
+    PeriodTotals:
+      type: object
+      properties:
+        conversations:
+          type: integer
+        questions:
+          type: integer
+        answered:
+          type: integer
+        handoffs:
+          type: integer
+        median_handle_minutes:
+          type: [integer, "null"]
+    Overview:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            days:
+              type: integer
+            time_zone:
+              type: string
+        totals:
+          $ref: "#/components/schemas/PeriodTotals"
+        previous_totals:
+          $ref: "#/components/schemas/PeriodTotals"
+        daily:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              answered:
+                type: integer
+              unanswered:
+                type: integer
+        top_documents:
+          type: array
+          items:
+            type: object
+            properties:
+              document_slug:
+                type: string
+              document_title:
+                type: string
+              answers:
+                type: integer
+        busiest:
+          type: array
+          items:
+            type: object
+            properties:
+              weekday:
+                type: integer
+                minimum: 1
+                maximum: 7
+                description: ISO weekday, 1 is Monday.
+              hour:
+                type: integer
+                minimum: 0
+                maximum: 23
+              questions:
+                type: integer
+        top_gaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/Gap"
+        recent_handoffs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Handoff"
+        has_sample_data:
+          type: boolean
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        title:
+          type: string
+        origin:
+          type: string
+          enum: [sample, upload]
+        source_filename:
+          type: [string, "null"]
+        char_count:
+          type: integer
+        passage_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DocumentUpload:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        title:
+          type: string
+          maxLength: 120
+        text:
+          type: string
+    Settings:
+      type: object
+      properties:
+        store:
+          type: object
+          properties:
+            name:
+              type: string
+            time_zone:
+              type: string
+        answers:
+          type: object
+          properties:
+            provider:
+              type: string
+              enum: [gemini, groq, openai, anthropic]
+            model:
+              type: [string, "null"]
+            fallback:
+              type: [object, "null"]
+              properties:
+                provider:
+                  type: string
+                model:
+                  type: string
+            embedding_model:
+              type: string
+            min_similarity:
+              type: number
+            daily_question_limit:
+              type: integer
+        alerts:
+          type: array
+          items:
+            type: object
+            properties:
+              channel:
+                type: string
+                enum: [slack, email, webhook]
+              state:
+                type: string
+                enum: [connected, log_only, missing_settings, turned_off, not_set_up]
+              missing:
+                type: array
+                items:
+                  type: string
+              target:
+                type: [string, "null"]
+                description: A host or the owner's inbox, never a full URL.
+              signed:
+                type: [boolean, "null"]
+        admin:
+          type: object
+          properties:
+            session_hours:
+              type: integer
+            password_set:
+              type: boolean
+            public_access:
+              type: boolean
+              description: Spec 005 amendment. ADMIN_PUBLIC is on, so no session is needed.

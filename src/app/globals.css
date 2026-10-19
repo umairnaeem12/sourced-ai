@@ -1,26 +1,133 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  color-scheme: light;
+  --bg: #f6f5f1;
+  --surface: #ffffff;
+  --surface-2: #efede7;
+  --ink: #121417;
+  --muted: #595f6a;
+  --faint: #8b9099;
+  --line: #e3e0d8;
+  --line-strong: #cfcabe;
+  --accent: #0d7c72;
+  --accent-strong: #0a5f58;
+  --accent-ink: #ffffff;
+  --accent-soft: #d8efea;
+  --glow: rgb(13 124 114 / 0.16);
+  --cite: #9a4b07;
+  --cite-soft: #fbefd9;
+  --shadow: 0 1px 2px rgb(18 20 23 / 0.04), 0 12px 32px -12px rgb(18 20 23 / 0.14);
+  --grid: rgb(18 20 23 / 0.05);
+  /* Spec 005 charts: validated with the dataviz palette checks against --surface. */
+  --series-1: #0a9688;
+  --series-2: #d07a0c;
+  --heat-high: #0a5f58;
+  --chart-grid: #ebe8e1;
+  --chart-axis: #cfcabe;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: dark;
+    --bg: #07090b;
+    --surface: #0e1215;
+    --surface-2: #141a1e;
+    --ink: #ecebe6;
+    --muted: #9ba3ac;
+    --faint: #69727b;
+    --line: #1d2429;
+    --line-strong: #2b343b;
+    --accent: #2dd4bf;
+    --accent-strong: #5eead4;
+    --accent-ink: #03201d;
+    --accent-soft: #0e2a27;
+    --glow: rgb(45 212 191 / 0.2);
+    --cite: #f5b454;
+    --cite-soft: #2c210e;
+    --shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 20px 48px -16px rgb(0 0 0 / 0.7);
+    --grid: rgb(255 255 255 / 0.045);
+    --series-1: #17a998;
+    --series-2: #c97d18;
+    --heat-high: #2dd4bf;
+    --chart-grid: #1a2125;
+    --chart-axis: #2b343b;
   }
 }
 
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-glow: var(--glow);
+  --color-cite: var(--cite);
+  --color-cite-soft: var(--cite-soft);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-heat-high: var(--heat-high);
+  --color-chart-grid: var(--chart-grid);
+  --color-chart-axis: var(--chart-axis);
+  --shadow-card: var(--shadow);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-instrument-serif);
+  --animate-pulse-dot: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--glow);
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+@utility bg-grid {
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+@utility text-gradient {
+  background-image: linear-gradient(120deg, var(--ink) 10%, var(--accent) 90%);
+  background-clip: text;
+  color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

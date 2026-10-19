@@ -1,0 +1,15 @@
+A customer on {{storeName}} asked for a person ({{askedAt}}).
+
+Reply to: {{#if email}}{{email}}{{else}}No email left{{/if}}
+Questions asked: {{questionCount}}
+Not answered: {{unansweredCount}}
+
+{{#each conversation}}
+Customer: {{question}}
+Sourced AI{{#unless is_answered}} (not answered){{/unless}}: {{answer_text}}
+
+{{/each}}
+Open the inbox: {{inboxUrl}}
+{{#if email}}
+Reply to this email to answer the customer directly.
+{{/if}}

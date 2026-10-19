@@ -12,12 +12,18 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: { "no-console": ["error", { allow: ["warn", "error"] }] },
+  },
+  {
     ignores: [
       "node_modules/**",
       ".next/**",
       "out/**",
       "build/**",
       "next-env.d.ts",
+      "playwright-report/**",
+      "test-results/**",
     ],
   },
 ];
