@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { EyeIcon, EyeOffIcon } from "./AdminIcons";
 import { signIn } from "./adminApi";
 
 export function LoginForm() {
@@ -9,6 +10,7 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [visible, setVisible] = useState(false);
 
   return (
     <form
@@ -34,16 +36,31 @@ export function LoginForm() {
       <label htmlFor="admin-password" className="text-sm font-medium">
         Admin password
       </label>
-      <input
-        id="admin-password"
-        type="password"
-        autoComplete="current-password"
-        value={password}
-        disabled={busy}
-        aria-invalid={error ? true : undefined}
-        onChange={(event) => setPassword(event.target.value)}
-        className="mt-2 w-full rounded-xl border border-line bg-bg px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-accent disabled:opacity-60"
-      />
+      {/* Password managers save and fill a password against a username, so give them a fixed one. */}
+      <input type="text" name="username" autoComplete="username" value="admin" readOnly hidden />
+      <div className="relative mt-2">
+        <input
+          id="admin-password"
+          name="password"
+          type={visible ? "text" : "password"}
+          autoComplete="current-password"
+          value={password}
+          disabled={busy}
+          aria-invalid={error ? true : undefined}
+          onChange={(event) => setPassword(event.target.value)}
+          className="w-full rounded-xl border border-line bg-bg py-2.5 pl-3.5 pr-11 text-sm outline-none transition-colors focus:border-accent disabled:opacity-60"
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((shown) => !shown)}
+          aria-label={visible ? "Hide password" : "Show password"}
+          aria-pressed={visible}
+          aria-controls="admin-password"
+          className="absolute inset-y-0 right-1 my-auto flex size-9 items-center justify-center rounded-lg text-muted transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          {visible ? <EyeOffIcon className="size-[18px]" /> : <EyeIcon className="size-[18px]" />}
+        </button>
+      </div>
       {error && (
         <p role="alert" className="mt-2 text-sm text-cite">
           {error}
